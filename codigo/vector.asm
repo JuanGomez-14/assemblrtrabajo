@@ -20,6 +20,8 @@ mayor DW 0
 menor DW 0
 suma DW 0
 opcion DB 0
+    entered_count DB 0
+    full_msg DB 13,10,'Vector lleno. Presione una tecla para continuar...','$'
 
 .CODE
 start:
@@ -83,16 +85,38 @@ main_loop:
 
 ; Ingresar 10 numeros
 do_ingresar:
-    MOV CX,10
-    XOR SI,SI
-.ing_loop:
+    ; comenzar desde entered_count, permitir hasta 10 entradas en total
+    MOV AL, [entered_count]
+    CMP AL, 10
+    JGE .full
+    ; CX = remaining = 10 - entered_count
+    MOV AH, 0
+    MOV BX, 10
+    MOV AL, [entered_count]
+    XOR AH, AH
+    SUB BX, AX
+    MOV CX, BX
+    ; SI = entered_count * 2 (byte offset in words)
+    MOV AL, [entered_count]
+    XOR AH, AH
+    MOV SI, AX
+    SHL SI, 1
+.ingresar_loop2:
     LEA DX, ingreso
+    MOV AH, 09h
+    INT 21h
+    CALL leer_numero
+    MOV [numeros+SI], AX
+    ADD SI, 2
+    INC BYTE PTR [entered_count]
+    LOOP .ingresar_loop2
+    JMP main_loop
+.full:
+    LEA DX, full_msg
     MOV AH,09h
     INT 21h
-    CALL leer_num
-    MOV [numeros+SI], AX
-    ADD SI,2
-    LOOP .ing_loop
+    MOV AH,01h
+    INT 21h
     JMP main_loop
 
 ; Mostrar vector
@@ -168,29 +192,54 @@ do_menor:
 do_salir:
     MOV AH,4Ch
     INT 21h
-
 ; Rutinas
-leer_num PROC
-    MOV BX,0
-.ld:
+; Leer hasta 2 dígitos. Devuelve AX con el numero (0 si solo Enter).
+leer_numero PROC
+    ; Preserve BX (used as accumulator) and CX (used as temp)
+    PUSH BX
+    PUSH CX
+
+    XOR BX, BX        ; accumulator in BX (word)
+    XOR CX, CX        ; digit counter
+
+leer_loop:
     MOV AH,01h
     INT 21h
     CMP AL,13
-    JE .fin
-    SUB AL,30h
-    MOV AX,BX
-    MOV CX,10
-    MUL CX
-    MOV DL,AL
-    XOR DH,DH
-    ADD AX,DX
-    MOV BX,AX
-    JMP .ld
-.fin:
-    MOV AX,BX
-    RET
-leer_num ENDP
+    JE leer_done
+    CMP AL,'0'
+    JB leer_loop
+    CMP AL,'9'
+    JA leer_loop
+    SUB AL,30h         ; AL = digit (0-9)
+    MOV AH,0           ; zero-extend AL into AX (AX = 0:AL)
 
+    ; BX = BX*10 -> BX*8 + BX*2
+    MOV DX, BX
+    SHL BX, 1          ; BX = BX*2
+    SHL DX, 3          ; DX = original*8
+    ADD BX, DX         ; BX = original*10
+    ADD BX, AX         ; BX += digit
+
+    INC CX
+    CMP CX, 2
+    JNE leer_loop
+
+    ; limpiar resto hasta Enter
+consume_rest:
+    MOV AH,01h
+    INT 21h
+    CMP AL,13
+    JNE consume_rest
+
+leer_done:
+    MOV AX, BX
+    POP CX
+    POP BX
+    RET
+leer_numero ENDP
+
+; Imprimir numero decimal en AX
 print_num PROC
     PUSH AX
     PUSH BX
@@ -198,27 +247,27 @@ print_num PROC
     PUSH DX
     MOV CX,0
     CMP AX,0
-    JNE .calc
+    JNE p_calc
     MOV DL,'0'
     MOV AH,02h
     INT 21h
-    JMP .done
-.calc:
+    JMP p_done
+p_calc:
     MOV BX,10
-.cvt:
+p_conv:
     XOR DX,DX
     DIV BX
     PUSH DX
     INC CX
     CMP AX,0
-    JNE .cvt
-.prn:
+    JNE p_conv
+p_print:
     POP DX
     ADD DL,30h
     MOV AH,02h
     INT 21h
-    LOOP .prn
-.done:
+    LOOP p_print
+p_done:
     POP DX
     POP CX
     POP BX
